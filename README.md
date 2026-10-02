@@ -1,6 +1,6 @@
 # Kubuntu Slash Commands
 
-A **system-wide `//` command launcher for Kubuntu Plasma Wayland**.
+A **global `//` command launcher for Kubuntu Plasma Wayland**.
 
 This is **not a browser extension**. It runs as a background desktop application and works in browsers, terminals, editors, file managers, and other applications.
 
@@ -22,57 +22,73 @@ chatgpt hi
 
 and press Enter.
 
-The launcher opens:
+Normal `/` and `//` input is forwarded normally when the two slashes are not pressed quickly enough.
 
-```
-https://chatgpt.com/?q=hi
-```
+## How it works
 
-Normal `//` comments still work if the two slashes are not pressed within the 280 ms window.
+Wayland does not let ordinary applications install arbitrary global keyboard hooks. This project uses Linux's evdev input layer to monitor physical keyboards and uinput to forward their events through a virtual keyboard.
 
-## Why it works on Wayland
-
-Wayland deliberately prevents ordinary applications from globally reading keyboard events.
-
-For a true system-wide shortcut based on arbitrary keys such as `//`, this project uses Linux's evdev input layer. The daemon temporarily grabs the physical keyboard devices, examines the key events, and forwards them through a virtual keyboard created with uinput. This lets it delay a slash long enough to distinguish a normal slash from the rapid `//` trigger.
-
-The Python evdev API supports exclusive device grabs and uinput event injection.
+The daemon temporarily grabs the physical keyboard devices, detects the rapid `//` sequence, and forwards everything else. This is why it requires access to `/dev/input` and `/dev/uinput`.
 
 ### Security warning
 
-**This is a powerful permission.** A process with access to keyboard input can potentially observe everything you type, including passwords.
+Access to keyboard event devices is sensitive. A process with these permissions can potentially observe everything typed, including passwords.
 
-The daemon itself only uses the events to detect the two-slash sequence and does not record or upload keystrokes, but giving a user access to `/dev/input` is inherently sensitive.
-
-Do not install this if you do not trust the code.
+This project does not record or upload keystrokes, but you should only install it if you trust the code.
 
 ## Installation
-
-Clone the repository:
 
 ```bash
 git clone https://github.com/Chibbit-99/kubuntu-slash-commands.git
 cd kubuntu-slash-commands
-```
-
-Run:
-
-```bash
 chmod +x install.sh
 ./install.sh
 ```
 
 The installer:
 
-1. Installs `python3-evdev` and PySide6.
-2. Adds your account to the `input` group.
-3. Gives the `input` group access to `/dev/uinput`.
-4. Installs the daemon as a systemd **user** service.
-5. Starts it automatically with your desktop session.
+1. Installs evdev and PySide6.
+2. Adds your account to the `input` group if necessary.
+3. Loads the Linux `uinput` module and makes it persistent.
+4. Installs the required udev rule.
+5. Installs a systemd **user** service.
+6. Enables the service at login.
+7. Writes a persistent launcher log to `~/.local/state/kubuntu-slash-commands/launcher.log`.
 
-Because the input-group membership changes your login credentials, **log out and log back in once** after installation.
+If the installer adds you to the `input` group, **log out and back in once**. Do not run the whole installer with `sudo`.
 
-The evdev documentation notes that accessing event devices generally requires root or membership in the `input` group, and that `UInput` injects keyboard events through Linux's uinput interface.
+## Troubleshooting
+
+Check whether the service is actually running:
+
+```bash
+systemctl --user status kubuntu-slash-commands.service
+```
+
+View recent service errors:
+
+```bash
+journalctl --user -u kubuntu-slash-commands.service -n 100 --no-pager
+```
+
+Follow the live journal:
+
+```bash
+journalctl --user -u kubuntu-slash-commands.service -f
+```
+
+The launcher also keeps its own log:
+
+```bash
+cat ~/.local/state/kubuntu-slash-commands/launcher.log
+```
+
+If the service is active but `//` does nothing, check that your current login has input-group access:
+
+```id -nG | tr ' ' '\n' | grep '^input$'
+```
+
+If that prints nothing, log out and back in after installation.
 
 ## Commands
 
@@ -100,45 +116,30 @@ A command is simply:
 
 `{query}` is URL-encoded automatically.
 
-After changing `commands.json`, restart:
+After changing `commands.json`:
 
 ```bash
-systemctl --user restart kubuntu-slash-commands
-```
-
-## Service commands
-
-Check status:
-
-```bash
-systemctl --user status kubuntu-slash-commands
-```
-
-View logs:
-
-```bash
-journalctl --user -u kubuntu-slash-commands -f
-```
-
-Stop it:
-
-```bash
-systemctl --user stop kubuntu-slash-commands
-```
-
-Start it:
-
-```bash
-systemctl --user start kubuntu-slash-commands
+systemctl --user restart kubuntu-slash-commands.service
 ```
 
 ## Uninstall
 
+Run the script as your normal user:
+
 ```bash
+chmod +x uninstall.sh
 ./uninstall.sh
 ```
 
-The uninstall script deliberately does **not** remove your account from the `input` group, because other software may rely on it.
+Or, if the executable bit is missing:
+
+```bash
+bash uninstall.sh
+```
+
+**Do not run `sudo ./uninstall.sh`.** The systemd command is a user-service command and needs your normal user session.
+
+The uninstall script removes the service, installed files, and udev rule. It deliberately does not remove your account from the `input` group.
 
 ## License
 
