@@ -11,24 +11,21 @@ echo "Installing Kubuntu Slash Commands..."
 sudo apt update
 sudo apt install -y python3-evdev python3-pyside6.qtwidgets python3-pyside6.qtgui python3-pyside6.qtcore
 
-sudo groupadd -f input
-if ! id -nG "$USER" | tr ' ' '\n' | grep -qx input; then
-  echo "Adding $USER to the input group..."
-  sudo usermod -aG input "$USER"
-  NEEDS_RELOGIN=1
-else
-  NEEDS_RELOGIN=0
-fi
-
+# Do not require the user to join the broad 'input' group or log out/in.
+# udev/logind grants the active graphical session access to keyboard devices.
 sudo modprobe uinput
 echo uinput | sudo tee /etc/modules-load.d/kubuntu-slash-commands.conf >/dev/null
 
 sudo tee /etc/udev/rules.d/99-kubuntu-slash-commands.rules >/dev/null <<'EOF'
-KERNEL=="uinput", GROUP="input", MODE="0660"
+# Allow the active graphical user to read keyboard event devices.
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_KEYBOARD}=="1", TAG+="uaccess"
+
+# Allow the active graphical user to create/use the virtual keyboard.
+KERNEL=="uinput", MODE="0660", TAG+="uaccess"
 EOF
 
 sudo udevadm control --reload-rules
-sudo udevadm trigger
+sudo udevadm trigger --subsystem-match=input --action=change
 
 mkdir -p "$INSTALL_DIR" "$SERVICE_DIR" "$STATE_DIR"
 cp "$REPO_DIR/slash-launcher.py" "$REPO_DIR/commands.json" "$INSTALL_DIR/"
@@ -57,27 +54,24 @@ EOF
 
 systemctl --user daemon-reload
 systemctl --user enable kubuntu-slash-commands.service
+systemctl --user stop kubuntu-slash-commands.service || true
+systemctl --user reset-failed kubuntu-slash-commands.service || true
+systemctl --user start kubuntu-slash-commands.service
+
+sleep 1
 
 echo
 echo "Installed."
 echo "Log file: $STATE_DIR/launcher.log"
 echo "Journal:  journalctl --user -u kubuntu-slash-commands.service -f"
 
-if [ "$NEEDS_RELOGIN" -eq 1 ]; then
-  echo
-  echo "IMPORTANT: log out and back in once before starting the service."
-  echo "The input-group permission is not active in the current login session."
+if systemctl --user is-active --quiet kubuntu-slash-commands.service; then
+  echo "Kubuntu Slash Commands is running."
 else
-  systemctl --user restart kubuntu-slash-commands.service
-  sleep 1
-  if systemctl --user is-active --quiet kubuntu-slash-commands.service; then
-    echo "Kubuntu Slash Commands is running."
-  else
-    echo
-    echo "The service did not stay running. Check:"
-    echo "  systemctl --user status kubuntu-slash-commands.service"
-    echo "  journalctl --user -u kubuntu-slash-commands.service -n 100 --no-pager"
-    echo "  cat $STATE_DIR/launcher.log"
-    exit 1
-  fi
+  echo
+  echo "The service did not stay running. Check:"
+  echo "  systemctl --user status kubuntu-slash-commands.service"
+  echo "  journalctl --user -u kubuntu-slash-commands.service -n 100 --no-pager"
+  echo "  cat $STATE_DIR/launcher.log"
+  exit 1
 fi
