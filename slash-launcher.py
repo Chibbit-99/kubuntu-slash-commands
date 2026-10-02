@@ -42,68 +42,67 @@ class Palette(QDialog):
         super().__init__()
         self.commands = commands
         self.bus = bus
+
         self.setWindowTitle("Slash Commands")
         self.setWindowFlag(Qt.FramelessWindowHint)
         self.setWindowFlag(Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setMinimumSize(620, 360)
+        self.setFixedSize(560, 82)
 
         self.edit = QLineEdit()
-        self.edit.setPlaceholderText("command query…")
-        self.list = QListWidget()
+        self.edit.setPlaceholderText("Type a command…")
+        self.edit.returnPressed.connect(self.execute)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 14, 14, 14)
-        layout.setSpacing(8)
+        layout.setContentsMargins(12, 12, 12, 12)
         layout.addWidget(self.edit)
-        layout.addWidget(self.list)
 
         self.setStyleSheet("""
-            QDialog { background: rgba(7,26,28,245); border: 1px solid rgba(80,227,212,80); border-radius: 16px; }
-            QLineEdit { background: rgba(10,37,39,230); border: 1px solid rgba(80,227,212,45); border-radius: 10px; padding: 13px; color: #d9fffa; font-size: 17px; }
-            QListWidget { background: transparent; border: 0; color: #d9fffa; outline: 0; }
-            QListWidget::item { padding: 12px; border-radius: 9px; }
-            QListWidget::item:selected { background: rgba(22,124,120,150); }
+            QDialog {
+                background: rgba(7, 26, 28, 248);
+                border: 1px solid rgba(80, 227, 212, 90);
+                border-radius: 14px;
+            }
+            QLineEdit {
+                background: rgba(10, 37, 39, 235);
+                border: 1px solid rgba(80, 227, 212, 55);
+                border-radius: 9px;
+                padding: 11px 13px;
+                color: #d9fffa;
+                font-size: 16px;
+            }
+            QLineEdit:focus {
+                border: 1px solid rgba(80, 227, 212, 120);
+            }
         """)
-        self.edit.textChanged.connect(self.refresh)
-        self.edit.returnPressed.connect(self.run_selected)
-        self.list.itemActivated.connect(self.run_item)
-        self.refresh()
 
     def show_palette(self):
         log.info("Opening command palette")
         self.edit.clear()
-        self.refresh()
         self.show()
         self.raise_()
         self.activateWindow()
         self.edit.setFocus(Qt.OtherFocusReason)
 
-    def refresh(self):
-        raw = self.edit.text().strip()
-        name = raw.split(maxsplit=1)[0].lstrip("/").lower() if raw else ""
-        self.list.clear()
-        for command, data in self.commands.items():
-            description = data.get("description", "")
-            if not name or name in command.lower() or name in description.lower():
-                item = QListWidgetItem(f"/{command}    {description}")
-                item.setData(Qt.UserRole, command)
-                self.list.addItem(item)
-        if self.list.count():
-            self.list.setCurrentRow(0)
-
-    def run_selected(self):
-        if self.list.currentItem():
-            self.run_item(self.list.currentItem())
-
-    def run_item(self, item):
-        command = item.data(Qt.UserRole)
-        parts = self.edit.text().strip().split(maxsplit=1)
-        query = parts[1] if len(parts) == 2 else ""
-        url = self.commands[command]["url"].replace("{query}", quote(query, safe=""))
-        log.info("Running /%s", command)
+    def execute(self):
+        text = self.edit.text().strip()
         self.hide()
         self.bus.resume.emit()
+
+        if not text:
+            return
+
+        parts = text.split(maxsplit=1)
+        command = parts[0].lstrip("/").lower()
+        query = parts[1] if len(parts) == 2 else ""
+
+        data = self.commands.get(command)
+        if not data:
+            log.warning("Unknown command: /%s", command)
+            return
+
+        url = data["url"].replace("{query}", quote(query, safe=""))
+        log.info("Running /%s", command)
         QDesktopServices.openUrl(QUrl(url))
 
     def keyPressEvent(self, event):
