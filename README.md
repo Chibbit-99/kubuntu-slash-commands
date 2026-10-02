@@ -36,7 +36,7 @@ Wayland deliberately prevents ordinary applications from globally reading keyboa
 
 For a true system-wide shortcut based on arbitrary keys such as `//`, this project uses Linux's evdev input layer. The daemon temporarily grabs the physical keyboard devices, examines the key events, and forwards them through a virtual keyboard created with uinput. This lets it delay a slash long enough to distinguish a normal slash from the rapid `//` trigger.
 
-The Python evdev API supports exclusive device grabs and uinput event injection. citeturn2search2
+The Python evdev API supports exclusive device grabs and uinput event injection.
 
 ### Security warning
 
@@ -72,7 +72,7 @@ The installer:
 
 Because the input-group membership changes your login credentials, **log out and log back in once** after installation.
 
-The evdev documentation notes that accessing event devices generally requires root or membership in the `input` group, and that `UInput` injects keyboard events through Linux's uinput interface. citeturn2search0turn2search2
+The evdev documentation notes that accessing event devices generally requires root or membership in the `input` group, and that `UInput` injects keyboard events through Linux's uinput interface.
 
 ## Commands
 
