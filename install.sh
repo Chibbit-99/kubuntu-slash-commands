@@ -5,23 +5,33 @@ REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 SERVICE_DIR="$HOME/.config/systemd/user"
 INSTALL_DIR="$HOME/.local/share/kubuntu-slash-commands"
 STATE_DIR="$HOME/.local/state/kubuntu-slash-commands"
+INSTALL_USER="$USER"
+
+# Never run the installer with sudo: the user service and desktop session
+# must belong to the logged-in user.
+if [[ $EUID -eq 0 ]]; then
+  echo "Do not run install.sh with sudo. Run: ./install.sh" >&2
+  exit 1
+fi
 
 echo "Installing Kubuntu Slash Commands..."
 
 sudo apt update
-sudo apt install -y python3-evdev python3-pyside6.qtwidgets python3-pyside6.qtgui python3-pyside6.qtcore
+sudo apt install -y python3-evdev python3-pyside6.qtwidgets python3-pyside6.qtgui python3-pyside6.qtcore acl
 
-# Do not require the user to join the broad 'input' group or log out/in.
-# udev/logind grants the active graphical session access to keyboard devices.
+# uinput is needed for the virtual keyboard used to forward normal typing.
 sudo modprobe uinput
 echo uinput | sudo tee /etc/modules-load.d/kubuntu-slash-commands.conf >/dev/null
 
-sudo tee /etc/udev/rules.d/99-kubuntu-slash-commands.rules >/dev/null <<'EOF'
-# Allow the active graphical user to read keyboard event devices.
-SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_KEYBOARD}=="1", TAG+="uaccess"
-
-# Allow the active graphical user to create/use the virtual keyboard.
-KERNEL=="uinput", MODE="0660", TAG+="uaccess"
+# Give only the installing desktop user access to the physical keyboard event
+# nodes and /dev/uinput. This avoids the broad 'input' group and does not
+# require a logout/login or manual group configuration.
+#
+# OWNER is resolved to the real username at install time, so this also works
+# for future keyboard hotplug events.
+sudo tee /etc/udev/rules.d/99-kubuntu-slash-commands.rules >/dev/null <<EOF
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_KEYBOARD}=="1", OWNER="$INSTALL_USER", MODE="0600"
+KERNEL=="uinput", OWNER="$INSTALL_USER", MODE="0600"
 EOF
 
 sudo udevadm control --reload-rules
