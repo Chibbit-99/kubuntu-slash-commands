@@ -1,0 +1,26 @@
+{
+  "chatgpt": {
+    "description": "Ask ChatGPT",
+    "url": "https://chatgpt.com/?q={query}"
+  },
+  "google": {
+    "description": "Search Google",
+    "url": "https://www.google.com/search?q={query}"
+  },
+  "youtube": {
+    "description": "Search YouTube",
+    "url": "https://www.youtube.com/results?search_query={query}"
+  },
+  "github": {
+    "description": "Search GitHub",
+    "url": "https://github.com/search?q={query}"
+  },
+  "wiki": {
+    "description": "Search Wikipedia",
+    "url": "https://en.wikipedia.org/w/index.php?search={query}"
+  },
+  "ddg": {
+    "description": "Search DuckDuckGo",
+    "url": "https://duckduckgo.com/?q={query}"
+  }
+}
