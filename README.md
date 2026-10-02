@@ -48,14 +48,13 @@ chmod +x install.sh
 The installer:
 
 1. Installs evdev and PySide6.
-2. Adds your account to the `input` group if necessary.
-3. Loads the Linux `uinput` module and makes it persistent.
-4. Installs the required udev rule.
-5. Installs a systemd **user** service.
-6. Enables the service at login.
-7. Writes a persistent launcher log to `~/.local/state/kubuntu-slash-commands/launcher.log`.
+2. Loads the Linux `uinput` module and makes it persistent.
+3. Installs a udev rule that gives **only your account** access to the keyboard event devices and `/dev/uinput`.
+4. Installs a systemd **user** service.
+5. Enables the service at login.
+6. Writes a persistent launcher log to `~/.local/state/kubuntu-slash-commands/launcher.log`.
 
-If the installer adds you to the `input` group, **log out and back in once**. Do not run the whole installer with `sudo`.
+No `input` group membership, logout/login, or manual input configuration is required. Do not run the installer with `sudo`.
 
 ## Troubleshooting
 
@@ -139,7 +138,7 @@ bash uninstall.sh
 
 **Do not run `sudo ./uninstall.sh`.** The systemd command is a user-service command and needs your normal user session.
 
-The uninstall script removes the service, installed files, and udev rule. It deliberately does not remove your account from the `input` group.
+The uninstall script removes the service, installed files, and udev rule.
 
 ## License
 
