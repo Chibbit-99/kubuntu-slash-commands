@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Kubuntu Slash Commands",
+  "version": "0.1.0",
+  "description": "A fast // command palette for web pages, designed for Kubuntu.",
+  "permissions": ["tabs"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [{
+    "matches": ["<all_urls>"],
+    "js": ["commands.js", "content.js"],
+    "css": ["styles.css"],
+    "run_at": "document_start"
+  }],
+  "action": { "default_title": "Kubuntu Slash Commands" }
+}
