@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import json
-import os
 import sys
 import threading
 import time
@@ -9,18 +8,20 @@ from urllib.parse import quote
 
 from evdev import InputDevice, UInput, ecodes, list_devices
 from PySide6.QtCore import Qt, Signal, QObject, QUrl
-from PySide6.QtGui import QGuiApplication
-from PySide6.QtWidgets import QApplication, QDialog, QLineEdit, QListWidget, QListWidgetItem, QVBoxLayout
 from PySide6.QtGui import QDesktopServices
+from PySide6.QtWidgets import QApplication, QDialog, QLineEdit, QListWidget, QListWidgetItem, QVBoxLayout
 
 BASE = Path(__file__).resolve().parent
 COMMANDS_FILE = BASE / "commands.json"
-DOUBLE_SLASH_MS = 280
+DOUBLE_SLASH_SECONDS = 0.280
 SLASH = ecodes.KEY_SLASH
+
 
 class Bus(QObject):
     trigger = Signal()
+    resume = Signal()
     status = Signal(str)
+
 
 class Palette(QDialog):
     def __init__(self, commands, bus):
@@ -74,7 +75,6 @@ class Palette(QDialog):
 
         self.edit.textChanged.connect(self.refresh)
         self.edit.returnPressed.connect(self.run_selected)
-        self.edit.installEventFilter(self)
         self.list.itemActivated.connect(self.run_item)
         self.refresh()
 
@@ -90,11 +90,13 @@ class Palette(QDialog):
         raw = self.edit.text().strip()
         name = raw.split(maxsplit=1)[0].lower() if raw else ""
         self.list.clear()
+
         for command, data in self.commands.items():
             if not name or name in command.lower() or name in data["description"].lower():
                 item = QListWidgetItem(f"/{command}    {data['description']}")
                 item.setData(Qt.UserRole, command)
                 self.list.addItem(item)
+
         if self.list.count():
             self.list.setCurrentRow(0)
 
@@ -108,16 +110,19 @@ class Palette(QDialog):
         raw = self.edit.text().strip()
         parts = raw.split(maxsplit=1)
         query = parts[1] if len(parts) == 2 else ""
-        template = self.commands[command]["url"]
-        url = template.replace("{query}", quote(query, safe=""))
+        url = self.commands[command]["url"].replace("{query}", quote(query, safe=""))
+
         self.hide()
+        self.bus.resume.emit()
         QDesktopServices.openUrl(QUrl(url))
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Escape:
             self.hide()
+            self.bus.resume.emit()
             return
         super().keyPressEvent(event)
+
 
 class KeyboardBridge:
     def __init__(self, bus):
@@ -128,10 +133,12 @@ class KeyboardBridge:
         self.uinput = None
         self.pending = []
         self.pending_since = 0.0
+        self.pending_timer = None
         self.lock = threading.Lock()
 
     def start(self):
         keyboards = []
+
         for path in list_devices():
             try:
                 dev = InputDevice(path)
@@ -142,10 +149,11 @@ class KeyboardBridge:
                 pass
 
         if not keyboards:
-            raise RuntimeError("No accessible keyboard devices found. Check that your user is in the input group.")
+            raise RuntimeError(
+                "No accessible keyboard devices found. "
+                "Check that your user is in the input group."
+            )
 
-        # One virtual keyboard forwards the physical keyboard events after
-        # we have decided whether the slash sequence is a command.
         self.uinput = UInput(
             {ecodes.EV_KEY: list(range(1, 768))},
             name="Kubuntu Slash Commands Virtual Keyboard"
@@ -169,47 +177,62 @@ class KeyboardBridge:
         self.pending.clear()
         self.pending_since = 0.0
 
+        if self.pending_timer:
+            self.pending_timer.cancel()
+            self.pending_timer = None
+
+    def delayed_flush(self):
+        with self.lock:
+            if self.pending and not self.active and not self.stop:
+                self.flush_pending()
+
+    def arm_flush(self):
+        if self.pending_timer:
+            self.pending_timer.cancel()
+        self.pending_timer = threading.Timer(DOUBLE_SLASH_SECONDS, self.delayed_flush)
+        self.pending_timer.daemon = True
+        self.pending_timer.start()
+
     def read_device(self, dev):
         try:
             dev.grab()
+
             for event in dev.read_loop():
                 with self.lock:
                     if self.stop:
                         break
 
-                    now = time.monotonic()
-
                     if self.active:
                         self.emit(event)
                         continue
 
+                    now = time.monotonic()
+
                     if event.type == ecodes.EV_KEY and event.code == SLASH:
                         if event.value == 1:
-                            if self.pending and (now - self.pending_since) <= DOUBLE_SLASH_MS / 1000:
-                                # Second slash: suppress both slashes and open.
+                            if self.pending and now - self.pending_since <= DOUBLE_SLASH_SECONDS:
                                 self.pending.clear()
                                 self.pending_since = 0.0
+                                if self.pending_timer:
+                                    self.pending_timer.cancel()
+                                    self.pending_timer = None
                                 self.active = True
                                 self.bus.trigger.emit()
-                            elif self.pending:
-                                self.flush_pending()
-                                self.pending.append(event)
-                                self.pending_since = now
                             else:
-                                self.pending.append(event)
+                                if self.pending:
+                                    self.flush_pending()
+                                self.pending = [event]
                                 self.pending_since = now
+                                self.arm_flush()
+                        elif self.pending:
+                            self.pending.append(event)
                         else:
-                            if self.pending:
-                                self.pending.append(event)
-                            else:
-                                self.emit(event)
+                            self.emit(event)
                     else:
                         if self.pending:
                             self.flush_pending()
                         self.emit(event)
 
-                    if self.pending and now - self.pending_since > DOUBLE_SLASH_MS / 1000:
-                        self.flush_pending()
         except Exception as exc:
             self.bus.status.emit(f"{dev.name}: {exc}")
         finally:
@@ -226,35 +249,32 @@ class KeyboardBridge:
         with self.lock:
             self.stop = True
             self.flush_pending()
+
         for dev in self.devices:
             try:
                 dev.ungrab()
                 dev.close()
             except Exception:
                 pass
+
         if self.uinput:
             self.uinput.close()
+
 
 def load_commands():
     with open(COMMANDS_FILE, encoding="utf-8") as f:
         return json.load(f)
 
+
 def main():
     app = QApplication(sys.argv)
     bus = Bus()
-    commands = load_commands()
-    palette = Palette(commands, bus)
+    palette = Palette(load_commands(), bus)
     bridge = KeyboardBridge(bus)
 
-    def trigger():
-        palette.show_palette()
-
-    def hidden():
-        bridge.resume()
-
-    bus.trigger.connect(trigger)
-    palette.finished.connect(lambda _: bridge.resume())
-    palette.rejected.connect(hidden)
+    bus.trigger.connect(palette.show_palette)
+    bus.resume.connect(bridge.resume)
+    app.aboutToQuit.connect(bridge.shutdown)
 
     try:
         bridge.start()
@@ -262,12 +282,8 @@ def main():
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
-    def on_hide():
-        if not palette.isVisible():
-            bridge.resume()
-
-    app.aboutToQuit.connect(bridge.shutdown)
     return app.exec()
+
 
 if __name__ == "__main__":
     raise SystemExit(main())
